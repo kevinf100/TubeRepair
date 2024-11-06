@@ -11,6 +11,9 @@ Optimized and Organized
 #import "YTVideo.h"
 #import "YTPlayerController.h"
 
+static bool drmTest = NO;
+static bool useHLS = NO;
+
 // Set default URL if not already set
 void betaSetDefaultUrl(void) {
     NSString *defaultApiKey = @"http://ax.init.mali357.gay/TubeRepair/";
@@ -21,6 +24,22 @@ void betaSetDefaultUrl(void) {
         [prefs setObject:defaultApiKey forKey:@"URLEndpoint"];
         [prefs writeToFile:settingsPath atomically:YES];
     }
+}
+
+// Set default URL if not already set
+void setVars(void) {
+    NSString *settingsPath = @"/var/mobile/Library/Preferences/bag.xml.tuberepairpreference.plist";
+    NSMutableDictionary *prefs = [[NSMutableDictionary alloc] initWithContentsOfFile:settingsPath];
+
+    if (![prefs objectForKey:@"drmTest"]) {
+        [prefs setObject:@(NO) forKey:@"drmTest"];
+    }
+    if (![prefs objectForKey:@"hlsEnable"]) {
+        [prefs setObject:@(NO) forKey:@"hlsEnable"];
+    }
+    
+    drmTest = [[prefs objectForKey:@"drmTest"] boolValue];
+    useHLS = [[prefs objectForKey:@"hlsEnable"] boolValue];
 }
 
 %group Baseplate
@@ -88,6 +107,9 @@ void sendToServer(NSData *passData, void (^completionHandler)(NSString *response
     urlRequest.HTTPMethod = @"POST";
     // Tell the server it's json
     [urlRequest setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    if (useHLS) {
+        [urlRequest setValue:@"True" forHTTPHeaderField:@"HLS-Video"];
+    }
     // Set what YouTube sent us to the request data.
     urlRequest.HTTPBody = passData;
 
@@ -201,6 +223,53 @@ void getInnerTubeVideo(NSString *videoID, void (^completionHandler)(NSString *ur
         });
     }
 }
+
+void getInnerTubeHlsVideo(NSString *videoID, void (^completionHandler)(NSString *urlString, NSError *error)) {
+    // InnerTube
+    NSMutableURLRequest * urlRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"]];
+    // Set to post
+    urlRequest.HTTPMethod = @"POST";
+    NSURLResponse * response = nil;
+    //NSString * userAgent = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.46 Safari/537.36";
+    //[urlRequest setValue:userAgent forHTTPHeaderField:@"User-Agent"];
+    // Tell the server it's json. Might be useless here.
+    [urlRequest setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    NSError *jsonError = nil;
+    // Data building.
+    NSDictionary *client = @{@"clientName": @"IOS",
+                             @"clientVersion": @"19.16.3",
+                             @"visitorData" : @"CgtfVHB0eHw4PIBAREiEgHg"};
+    NSDictionary *context = @{@"client": client};
+    // Combined Client and context for body.
+    NSDictionary *jsonDict = @{@"context": context,
+                               @"params": @"8AEB",
+                               @"videoId": videoID};
+    // Convert to Json
+    NSData *requestBodyData = [NSJSONSerialization dataWithJSONObject:jsonDict options:0 error:&jsonError];
+    // Set to body
+    urlRequest.HTTPBody = requestBodyData;
+    NSError * error = nil;
+    // Fire request
+    NSData * data = [NSURLConnection sendSynchronousRequest:urlRequest
+                                            returningResponse:&response
+                                                        error:&error];
+    if (error)
+    {
+        // Error
+        completionHandler(nil, error);
+    } else {
+        // Send to server to format for us.
+        sendToServer(data, ^(NSString *responseString, NSError *error) {
+            if (error) {
+                // If it errors
+                completionHandler(nil, error);
+            } else {
+                // Send String (URL) back
+                completionHandler(responseString, nil);
+            }
+        });
+    }
+}
 /*
 NSString* getInnerTubeVideo(NSString *videoID) {
     // Send a synchronous request
@@ -246,9 +315,11 @@ static NSString *updatedUrl;
 
 - (id)initWithURL:(id)arg1 format:(int)arg2 encrypted:(char)arg3 {
     //getInnerTube();
-    NSURL *customURL = [NSURL URLWithString:updatedUrl];
-    return %orig(customURL, arg2, arg3);
-
+    if (drmTest) {
+        NSURL *customURL = [NSURL URLWithString:updatedUrl];
+        return %orig(customURL, arg2, arg3);
+    }
+    return %orig(arg1, arg2, arg3);
 }
 
 %end
@@ -263,16 +334,35 @@ static NSString *updatedUrl;
     // Get Video Id
     NSString *videoID = [video_ valueForKey:@"ID_"];
     // Get the youtube link!
-    getInnerTubeVideo(videoID, ^(NSString *urlString, NSError *error) {
-        if (error) {
-            return;
+    if (drmTest) {
+        if (useHLS) {
+            getInnerTubeHlsVideo(videoID, ^(NSString *urlString, NSError *error) {
+                if (error) {
+                    return;
+                }
+
+                updatedUrl = urlString;
+
+                // Continue with the original method after the update
+                %orig;
+            });
         }
+        else {
+            getInnerTubeVideo(videoID, ^(NSString *urlString, NSError *error) {
+                if (error) {
+                    return;
+                }
 
-        updatedUrl = urlString;
+                updatedUrl = urlString;
 
-        // Continue with the original method after the update
+                // Continue with the original method after the update
+                %orig;
+            });
+        }
+    }
+    else {
         %orig;
-    });
+    }
 }
 
 /*
@@ -571,6 +661,7 @@ static NSString *updatedUrl;
     if (version >= 2.0 && version < 11.0) {
         %init(Baseplate);
         betaSetDefaultUrl();
+        setVars();
         fetchYouTubeTVPageAndExtractClientID(^(BOOL success, NSString *clientID, NSString *clientSecret) {
             if (success) {
                 NSLog(@"Successfully extracted client ID: %@ and secret: %@", clientID, clientSecret);
