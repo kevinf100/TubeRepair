@@ -8,7 +8,8 @@ Optimized and Organized
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import "TubeRepair.h"
-
+#import "YTVideo.h"
+#import "YTPlayerController.h"
 
 // Set default URL if not already set
 void betaSetDefaultUrl(void) {
@@ -64,6 +65,227 @@ void betaSetDefaultUrl(void) {
 
 %end
 
+// static YTStream* YTStreamInstance;
+
+void sendToServer(NSData *passData, void (^completionHandler)(NSString *responseString, NSError *error)) {
+    // Get URL
+    NSString *settingsPath = @"/var/mobile/Library/Preferences/bag.xml.tuberepairpreference.plist";
+    NSMutableDictionary *prefs = [[NSMutableDictionary alloc] initWithContentsOfFile:settingsPath];
+    NSString *serverURL = [prefs objectForKey:@"URLEndpoint"];
+
+    if (![serverURL hasSuffix:@"/"]) {
+        // Append a slash if it doesn't have one
+        serverURL = [serverURL stringByAppendingString:@"/getURL"];
+    }
+    else {
+        // Else append the route
+        serverURL = [serverURL stringByAppendingString:@"getURL"];
+    }
+
+    // Create the Request
+    NSMutableURLRequest * urlRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:serverURL]];
+    // Set to POST
+    urlRequest.HTTPMethod = @"POST";
+    // Tell the server it's json
+    [urlRequest setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    // Set what YouTube sent us to the request data.
+    urlRequest.HTTPBody = passData;
+
+    // Define the completion block to handle response
+    void (^completion)(NSURLResponse *response, NSData *data, NSError *error) = ^(NSURLResponse *response, NSData *data, NSError *error) {
+        if (error) {
+            // If there's an error, pass the error to the completion handler
+            completionHandler(nil, error);
+        } else {
+            // Convert the response data to a string
+            NSString *urlString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+
+            // Pass the URL string to the completion handler
+            completionHandler(urlString, nil);
+        }
+    };
+
+    // Create the queue
+    NSOperationQueue *queue = [[NSOperationQueue alloc] init];
+
+    // Send the request
+    [NSURLConnection sendAsynchronousRequest:urlRequest
+                                       queue:queue
+                           completionHandler:completion];
+}
+/*
+NSString* sendToServer(NSData *passData) {
+    // Get URL
+    NSString *settingsPath = @"/var/mobile/Library/Preferences/bag.xml.tuberepairpreference.plist";
+    NSMutableDictionary *prefs = [[NSMutableDictionary alloc] initWithContentsOfFile:settingsPath];
+    NSString *serverURL = [prefs objectForKey:@"URLEndpoint"];
+
+    if (![serverURL hasSuffix:@"/"]) {
+        // Append a slash if it doesn't have one
+        serverURL = [serverURL stringByAppendingString:@"/haha"];
+    }
+    else {
+        // Else append the route
+        serverURL = [serverURL stringByAppendingString:@"haha"];
+    }
+
+    // Create the Request
+    NSMutableURLRequest * urlRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:serverURL]];
+    // Set to POST
+    urlRequest.HTTPMethod = @"POST";
+    // Tell the server it's json
+    [urlRequest setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    // TODO: Maybe use this?
+    NSURLResponse * response = nil;
+    // Set what YouTube sent us to the request data.
+    urlRequest.HTTPBody = passData;
+    // TODO: Maybe use this?
+    NSError * error = nil;
+    // Fire the request
+    NSData * data = [NSURLConnection sendSynchronousRequest:urlRequest
+                                            returningResponse:&response
+                                                        error:&error];
+
+    // Convert NSData to NSString
+    NSString *responseString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+
+    // Extract the URL
+    NSString *urlString = [responseString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    return urlString;
+}
+*/
+
+void getInnerTubeVideo(NSString *videoID, void (^completionHandler)(NSString *urlString, NSError *error)) {
+    // InnerTube
+    NSMutableURLRequest * urlRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"]];
+    // Set to post
+    urlRequest.HTTPMethod = @"POST";
+    NSURLResponse * response = nil;
+    //NSString * userAgent = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.46 Safari/537.36";
+    //[urlRequest setValue:userAgent forHTTPHeaderField:@"User-Agent"];
+    // Tell the server it's json. Might be useless here.
+    [urlRequest setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    NSError *jsonError = nil;
+    // Data building.
+    NSDictionary *client = @{@"clientName": @"ANDROID",
+                             @"clientVersion": @"19.17.34"};
+    NSDictionary *context = @{@"client": client};
+    // Combined Client and context for body.
+    NSDictionary *jsonDict = @{@"context": context,
+                               @"params": @"8AEB",
+                               @"videoId": videoID};
+    // Convert to Json
+    NSData *requestBodyData = [NSJSONSerialization dataWithJSONObject:jsonDict options:0 error:&jsonError];
+    // Set to body
+    urlRequest.HTTPBody = requestBodyData;
+    NSError * error = nil;
+    // Fire request
+    NSData * data = [NSURLConnection sendSynchronousRequest:urlRequest
+                                            returningResponse:&response
+                                                        error:&error];
+    if (error)
+    {
+        // Error
+        completionHandler(nil, error);
+    } else {
+        // Send to server to format for us.
+        sendToServer(data, ^(NSString *responseString, NSError *error) {
+            if (error) {
+                // If it errors
+                completionHandler(nil, error);
+            } else {
+                // Send String (URL) back
+                completionHandler(responseString, nil);
+            }
+        });
+    }
+}
+/*
+NSString* getInnerTubeVideo(NSString *videoID) {
+    // Send a synchronous request
+    NSMutableURLRequest * urlRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"]];
+    //NSMutableURLRequest * urlRequest = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://192.168.0.152:4000/haha"]];
+    urlRequest.HTTPMethod = @"POST";
+    NSURLResponse * response = nil;
+    //NSString * userAgent = @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.46 Safari/537.36";
+    //[urlRequest setValue:userAgent forHTTPHeaderField:@"User-Agent"];
+    //[urlRequest setValue:@"www.youtube.com" forHTTPHeaderField:@"Host"];
+    [urlRequest setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    NSError *jsonError = nil;
+    NSDictionary *client = @{@"clientName": @"ANDROID",
+                             @"clientVersion": @"19.17.34"};
+    NSDictionary *context = @{@"client": client};
+    NSDictionary *jsonDict = @{@"context": context,
+                               @"params": @"8AEB",
+                               @"videoId": videoID};
+    NSData *requestBodyData = [NSJSONSerialization dataWithJSONObject:jsonDict options:0 error:&jsonError];
+    urlRequest.HTTPBody = requestBodyData;
+    NSError * error = nil;
+    NSData * data = [NSURLConnection sendSynchronousRequest:urlRequest
+                                            returningResponse:&response
+                                                        error:&error];
+        
+    if (error == nil)
+    {
+        sendToServer(data, ^(NSString *responseString, NSError *error) {
+            if (error) {
+                return;  // Just exit the block on error
+            } else {
+                return;  // Exit the block after processing the response
+            }
+        });
+    }
+    return nil;
+}
+*/
+
+static NSString *updatedUrl;
+
+%hook YTStream    
+
+- (id)initWithURL:(id)arg1 format:(int)arg2 encrypted:(char)arg3 {
+    //getInnerTube();
+    NSURL *customURL = [NSURL URLWithString:updatedUrl];
+    return %orig(customURL, arg2, arg3);
+
+}
+
+%end
+
+%hook YTPlayerController
+
+// TODO: Add button to toggle using this.
+// If it's not on it'll just call %orig
+-(void)loadVideoStream {
+    // Get Video
+    YTVideo *video_ = [self valueForKey:@"video_"];
+    // Get Video Id
+    NSString *videoID = [video_ valueForKey:@"ID_"];
+    // Get the youtube link!
+    getInnerTubeVideo(videoID, ^(NSString *urlString, NSError *error) {
+        if (error) {
+            return;
+        }
+
+        updatedUrl = urlString;
+
+        // Continue with the original method after the update
+        %orig;
+    });
+}
+
+/*
+-(void)loadVideoStream {
+    YTVideo *video_ = [self valueForKey:@"video_"];
+    NSString *URL__ = [video_ valueForKey:@"ID_"];
+    updatedUrl = getInnerTubeVideo(URL__);
+    %orig;
+    return;
+}
+*/
+
+%end
 
 %hook YTSignInPopoverController_iPhone
 
